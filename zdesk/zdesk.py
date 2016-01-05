@@ -2,6 +2,7 @@ import sys
 import re
 import base64
 import pkg_resources
+import time
 
 if sys.version < '3':
     from httplib import responses
@@ -42,6 +43,8 @@ class AuthenticationError(ZendeskError):
 class RateLimitError(ZendeskError):
     pass
 
+class RetriesExceededError(ZendeskError):
+    pass
 
 class Zendesk(ZendeskAPI):
     """ Python API Wrapper for Zendesk"""
@@ -49,7 +52,7 @@ class Zendesk(ZendeskAPI):
 
     def __init__(self, zdesk_url, zdesk_email=None, zdesk_password=None,
                  zdesk_token=False, headers=None, client_args=None,
-                 api_version=2):
+                 api_version=2, handle_rate_limit=False, max_retries=0):
         """
         Instantiates an instance of Zendesk. Takes optional parameters for
         HTTP Basic Authentication
@@ -75,6 +78,9 @@ class Zendesk(ZendeskAPI):
         if zdesk_token:
             self.zdesk_email += "/token"
         self.zdesk_password = zdesk_password
+
+        self.handle_rate_limit = handle_rate_limit
+        self.max_retries = max_retries
 
         # Set headers
         self.headers = headers
@@ -149,27 +155,7 @@ class Zendesk(ZendeskAPI):
         all_requests_complete = False
 
         while not all_requests_complete:
-            # Make an http request
-            response, content = self.client.request(
-                                    url,
-                                    method,
-                                    body=body,
-                                    headers=self.headers
-                                )
-
-            # If the response status is not in the 200 range then assume an
-            # error and raise proper exception
-
-            response_status = int(response.get('status', 0))
-
-            if response_status < 200 or response_status > 299:
-                if response_status == 401:
-                    raise AuthenticationError(content, response_status, response)
-                elif response_status == 429:
-                    # FYI: Check the Retry-After header for how many seconds to sleep
-                    raise RateLimitError(content, response_status, response)
-                else:
-                    raise ZendeskError(content, response_status, response)
+            content, response = self.make_request(url, method, body, self.headers)
 
             if content.strip():
                 content = json.loads(content)
@@ -183,7 +169,7 @@ class Zendesk(ZendeskAPI):
                 results.append({
                     'response': response,
                     'content': content,
-                    'status': response_status
+                    'status': Zendesk.get_status(response)
                 })
 
             else:
@@ -197,7 +183,7 @@ class Zendesk(ZendeskAPI):
                 elif content:
                     results.append(content)
                 else:
-                    results.append(responses[response_status])
+                    results.append(responses[Zendesk.get_status(response)])
 
             # if there is a next_page, and we are getting pages, then continue
             # making requests
@@ -281,4 +267,36 @@ class Zendesk(ZendeskAPI):
         # perhaps, a sequence of empty dicts were returned or some such.
         # Send everything back.
         return results
+
+    @staticmethod
+    def get_status(response):
+        return int(response.get('status', 0))
+
+    def make_request(self, url, method, body, headers):
+        for retries in xrange(self.max_retries + 1):
+            print("Requesting: {}".format(url))
+            response, content = self.client.request(url, 
+                                                    method, 
+                                                    body=body, 
+                                                    headers=headers)
+            # If the response status is not in the 200 range then assume an
+            # error and raise proper exception
+            response_status = Zendesk.get_status(response)
+            if response_status < 200 or response_status > 299:
+                if response_status == 401:
+                    raise AuthenticationError(content, response_status, response)
+                elif response_status == 429:
+                    if self.handle_rate_limit and retries < self.max_retries:
+                        s_until_reset = response['retry-after']
+                        print("Request rate limit exceeded, waiting {}s and retrying({}/{}).".format(s_until_reset, retries + 1, self.max_retries))
+                        time.sleep(int(s_until_reset))
+                    else:
+                        raise RateLimitError(content, response_status, response)
+                else:
+                    raise ZendeskError(content, response_status, response)
+            else:
+                return (content, response)
+        
+        raise RetriesExceededError(content, response_status, response)
+    
 
