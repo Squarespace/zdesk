@@ -5,11 +5,11 @@ setup(
     # Basic package information.
     name = 'zdesk',
     author = 'Brent Woodruff',
-    version = '2.2.1',
     author_email = 'brent@fprimex.com',
     packages = ['zdesk'],
     include_package_data = True,
     install_requires = ['httplib2', 'simplejson'],
+    version='2.2.1+sqsp',
     license='LICENSE.txt',
     url = 'https://github.com/fprimex/zdesk',
     keywords = 'zendesk api helpdesk',
@@ -22,6 +22,7 @@ setup(
         'Topic :: Internet',
         'Programming Language :: Python :: 2',
         'Programming Language :: Python :: 3',
+        "Private :: Do Not Upload",
     ],
 )
 
