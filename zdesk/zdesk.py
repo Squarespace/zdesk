@@ -274,7 +274,6 @@ class Zendesk(ZendeskAPI):
 
     def make_request(self, url, method, body, headers):
         for retries in xrange(self.max_retries + 1):
-            print("Requesting: {}".format(url))
             response, content = self.client.request(url, 
                                                     method, 
                                                     body=body, 
